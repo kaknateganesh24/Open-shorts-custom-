@@ -1,0 +1,70 @@
+services:
+  backend:
+    build: .
+    container_name: openshorts-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - /app/__pycache__
+      - ./output:/app/output
+    environment:
+      # ── Whisper / Transcription (Intel i5 CPU, 16GB RAM) ──────────────────
+      - WHISPER_MODEL=tiny
+      - WHISPER_DEVICE=cpu
+      - WHISPER_COMPUTE=int8
+      - WHISPER_BEAM_SIZE=1
+      - WHISPER_CPU_THREADS=4
+
+      # ── YouTube download: use Node.js for bgutil PO-token (not Deno) ──────
+      # BGUTIL_SCRIPT_PATH is set in the Dockerfile to the pre-compiled Node.js
+      # generate_once.js. We disable Deno here so yt-dlp uses Node.js only
+      # (Deno JIT-compiles .ts on first run and times out on slow CPUs).
+      - BGUTIL_DISABLE_DENO=1
+      - YT_DLP_JS_RUNTIMES=node
+
+      # ── Local Ollama AI (moment detection, no Gemini key needed) ──────────
+      - AI_PROVIDER=openai
+      - LLM_PROVIDER=openai
+      - AI_BASE_URL=http://host.docker.internal:11434/v1
+      - LLM_BASE_URL=http://host.docker.internal:11434/v1
+      - AI_MODEL=qwen2.5:3b
+      - LLM_MODEL=qwen2.5:3b
+
+      # ── Upload-Post: optional, only for social publishing ──────────────────
+      # Leave UPLOAD_POST_API_KEY unset — users configure it in the UI if needed
+
+      # ── General performance ────────────────────────────────────────────────
+      - FFMPEG_THREADS=2
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./dashboard
+      target: dev
+    container_name: openshorts-frontend
+    ports:
+      - "5175:5173"
+    volumes:
+      - ./dashboard:/app
+      - /app/node_modules
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+  renderer:
+    build:
+      context: .
+      dockerfile: render-service/Dockerfile
+    container_name: openshorts-renderer
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./output:/output
+    environment:
+      - REMOTION_BUNDLE_PATH=/app/remotion
+      - OUTPUT_DIR=/output
+      - PORT=3100
+    restart: unless-stopped
+    depends_on:
+      - backend
